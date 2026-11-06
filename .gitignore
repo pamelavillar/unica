@@ -170,3 +170,5 @@ wandb/
 UniCA-M5/
 lightning_logs/
 datos/
+
+README.MD
