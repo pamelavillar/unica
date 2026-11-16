@@ -171,4 +171,10 @@ UniCA-M5/
 lightning_logs/
 datos/
 
-README.MD
+/README.MD
+
+# Salidas de m5cx/
+output/
+m5/
+m5_lean_*/
+m5_raw/

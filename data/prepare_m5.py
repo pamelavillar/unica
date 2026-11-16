@@ -1,5 +1,10 @@
 """Convierte los CSV originales de M5 (Kaggle) al formato HF-datasets que usa este proyecto.
 
+ALTERNATIVA. La preparacion oficial del proyecto es la de m5cx/ (m5_lean.py + m5_to_unica.py): el mismo M5 que
+ChronosX (d_1..d_1969, 12 covariables, series desde la primera venta, sin categoricas estaticas), que es la que
+permite comparar UniCA con ChronosX serie por serie. Este script queda por si se quiere usar la version de
+Kaggle (d_1..d_1941, 6 covariables, categoricas estaticas); sus resultados NO son comparables con ChronosX.
+
 Uso:
     python data/prepare_m5.py --csv_dir /ruta/m5-forecasting-accuracy --out datos/m5/M5_test
     python data/prepare_m5.py ... --num_series 1000   # subconjunto aleatorio (pruebas rápidas)
