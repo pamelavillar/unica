@@ -10,7 +10,7 @@ Protocolo para UniCA en M5, reducido para Colab y reanudable (misma estructura q
 
 Todo lo que ya esta hecho se salta: si Colab corta, vuelve a lanzar el mismo comando.
 Ejemplo (M5 completo):
-    python m5cx/orchestrate.py --out_root /content/drive/MyDrive/unica/m5_cx
+    python m5cx/orchestrate.py --out_root /content/drive/MyDrive/pfc1/unica/m5_cx
 """
 import argparse
 import json
@@ -87,63 +87,18 @@ def summarize():
     if not runs:
         log("No hay corridas finales terminadas todavia.")
         return
-    state = json.load(open(root / "state.json")) if (root / "state.json").exists() else {}
     b = runs[0]["baseline"]
-    L = []
-    L.append(f"# Resumen UniCA ({runs[0]['base_model']}): {runs[0]['dataset']}  "
-             f"({runs[0]['n_series']} series, horizonte {runs[0]['prediction_length']} = {runs[0]['n_items']} pronosticos)\n")
-    L.append(f"Epocas max: {runs[0]['max_epochs']} x {runs[0]['num_batches_per_epoch']} lotes de "
-             f"{runs[0]['batch_size']}x{runs[0]['accum']} | lr: {runs[0]['lr']} | "
-             f"corridas terminadas: {len(runs)}/{args.final_runs}\n")
-    if state.get("sweep"):
-        L.append("Barrido de lr (perdida de validacion de UniCA, menor es mejor): "
-                 + ", ".join(f"lr={k}: {v:.5f}" for k, v in state["sweep"].items()) + "\n")
-    L.append("| run | epocas | val_loss | MASE Bolt | MASE UniCA | cambio MASE | IC95 MASE | "
-             "WQL Bolt | WQL UniCA | cambio WQL | IC95 WQL | cambio MAE | IC95 MAE |")
-    L.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
-    keys = ("MASE[0.5]", "mean_weighted_sum_quantile_loss", "MAE[0.5]", "MSE[mean]", "MAPE[0.5]")
-    vals = {k: [] for k in keys}
-    norms = []
-    for r in runs:
-        u, bo = r["unica"], r["paired_bootstrap"]
-        for k in keys:
-            vals[k].append(u[k])
-        if "normalized" in u:
-            norms.append(u["normalized"])
-        ci = (lambda name: f"[{bo[name][0]:+.2f}, {bo[name][1]:+.2f}]%" if bo else "n/a")
-        L.append(
-            f"| {r['run_id']} | {r['epochs_run']} | {r['val_loss_unica']:.5f} | "
-            f"{b['MASE[0.5]']:.4f} | {u['MASE[0.5]']:.4f} | {r['rel_change_pct']['MASE']:+.2f}% | {ci('mase_rel_pct_ci95')} | "
-            f"{b['mean_weighted_sum_quantile_loss']:.4f} | {u['mean_weighted_sum_quantile_loss']:.4f} | "
-            f"{r['rel_change_pct']['WQL']:+.2f}% | {ci('wql_rel_pct_ci95')} | "
-            f"{r['rel_change_pct']['MAE']:+.2f}% | {ci('mae_rel_pct_ci95')} |"
-        )
-    sd = (lambda x: f"{np.std(x, ddof=1):.4f}" if len(x) > 1 else "n/a (1 sola corrida)")
+    metrics = [("MSE", "MSE[mean]"), ("MAE", "MAE[0.5]"), ("MAPE", "MAPE[0.5]"),
+               ("MASE", "MASE[0.5]"), ("WQL", "mean_weighted_sum_quantile_loss")]
+    u = {k: np.mean([r["unica"][k] for r in runs]) for _, k in metrics}
+
+    L = [f"{runs[0]['dataset']} ({runs[0]['n_series']} series, horizonte {runs[0]['prediction_length']})", ""]
+    L.append("UniCA:")
+    L += [f"- {name}: {u[k]:.4f}" for name, k in metrics]
     L.append("")
-    L.append(f"**Promedio de {len(runs)} corridas (UniCA)**: "
-             + " | ".join(f"{k} {np.mean(vals[k]):.4f} +- {sd(vals[k])}" for k in keys))
-    L.append("**Chronos-Bolt zero-shot**: " + " | ".join(f"{k} {b[k]:.4f}" for k in keys))
-    L.append("**Cambio relativo del promedio**: " + " | ".join(
-        f"{k} {100 * (np.mean(vals[k]) - b[k]) / b[k]:+.2f}%" for k in keys[:3]))
-    if norms and "normalized" in b:
-        L.append("")
-        L.append("Metricas normalizadas por Naive (como main.py -> normalized_results.csv; es la escala de las "
-                 "tablas del paper):")
-        L.append("| modelo | MAE_norm | MSE_norm | MAPE_norm | CRPS_norm |")
-        L.append("|---|---|---|---|---|")
-        bn = b["normalized"]
-        L.append(f"| Chronos-Bolt zero-shot | {bn['MAE_norm']:.4f} | {bn['MSE_norm']:.4f} | "
-                 f"{bn['MAPE_norm']:.4f} | {bn['CRPS_norm']:.4f} |")
-        L.append("| UniCA (promedio) | " + " | ".join(
-            f"{np.mean([n[k] for n in norms]):.4f}" for k in ("MAE_norm", "MSE_norm", "MAPE_norm", "CRPS_norm")) + " |")
-    L.append("")
-    L.append("IC95 = bootstrap emparejado (remuestreo de series) del cambio relativo de UniCA frente a Chronos-Bolt "
-             "en esa corrida; si incluye 0, la diferencia no se distingue de ruido de muestreo. No incluye la "
-             "variabilidad entre semillas de entrenamiento (para eso, mira la desviacion entre corridas). "
-             "WQL = mean_weighted_sum_quantile_loss en cuantiles 0.1..0.9 (la 'CRPS' del repo).")
-    tmin = [r["timing_min"].get("total") for r in runs]
-    L.append("")
-    L.append(f"Tiempo por corrida (min): {tmin}")
+    L.append("Chronos-Bolt:")
+    L += [f"- {name}: {b[k]:.4f}" for name, k in metrics]
+
     (root / "summary.md").write_text("\n".join(L))
     json.dump({"runs": runs}, open(root / "summary.json", "w"), indent=1)
     print("\n".join(L))

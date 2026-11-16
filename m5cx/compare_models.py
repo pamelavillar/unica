@@ -13,7 +13,7 @@ WQL: ChronosX guardo 19 cuantiles (0.05..0.95) y UniCA 9 (0.1..0.9). Para compar
 (la columna WQL19 es la del notebook de ChronosX, solo como referencia).
 MASE: estacionalidad 1 y media por serie en los dos notebooks (mismo calculo de gluonts).
 
-Uso: python m5cx/compare_models.py --cx_root /content/drive/MyDrive/chronosx/m5 --unica_root /content/drive/MyDrive/unica/m5_cx
+Uso: python m5cx/compare_models.py --cx_root /content/drive/MyDrive/pfc1/chronosx/m5 --unica_root /content/drive/MyDrive/pfc1/unica/m5_cx
 """
 import argparse
 import glob
