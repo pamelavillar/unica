@@ -119,7 +119,7 @@ if args_cli.num_series:
 
 train_seed = args_cli.seed + args_cli.run_id
 repo_cli = [
-    "--model_name", "ts_adapter/unica", "--base_model", args_cli.base_model,
+    "--model_name", "ts_adapter/unica",  # este repo solo usa Chronos-Bolt: utils.py no tiene --base_model
     "--with_gate", "--with_future", "--future_with_gate",
     "--datasets", "m5", "--num_workers", args_cli.num_workers,
     "--num_batches_per_epoch", args_cli.num_batches_per_epoch * args_cli.accum,
