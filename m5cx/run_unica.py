@@ -66,6 +66,10 @@ p.add_argument("--no_naive_norm", action="store_true",
                help="no normalizar con naive.json (que es del M5_test de los autores, no de otros datos)")
 p.add_argument("--filter_short", action="store_true",
                help="entrenar/validar solo con series de >= 2H+1 dias, como ChronosX (el test usa todas)")
+p.add_argument("--forecast_from", default=None,
+               help="npz de scripts/forecast_series.py (ChronosX): pronostica esas MISMAS series con UniCA "
+                    "(desde --out/ckpt/best.ckpt), guarda --forecast_out y termina. No entrena ni evalua.")
+p.add_argument("--forecast_out", default=None)
 p.add_argument("--subset_root", default="/content/data_subsets",
                help="donde se guarda el subconjunto de series cuando --num_series > 0")
 args_cli = p.parse_args()
@@ -80,7 +84,7 @@ from ua_utils import (  # noqa: E402
 t0 = time.time()
 out = Path(args_cli.out).resolve()
 out.mkdir(parents=True, exist_ok=True)
-if (out / "results.json").exists():
+if (out / "results.json").exists() and not args_cli.forecast_from:
     print(f"[skip] {out}/results.json ya existe")
     sys.exit(0)
 if args_cli.skip_test_eval and (out / "train_done.json").exists():
@@ -162,7 +166,7 @@ assert args_cli.base_model in PATHS, "este notebook solo cubre chronos_bolt_base
 
 # ------------------------------------------------------------------ 1. baseline
 base_items = None
-if not args_cli.skip_test_eval:
+if not args_cli.skip_test_eval and not args_cli.forecast_from:
     t = time.time()
     key = f"{args_cli.dataset.replace('/', '_')}_n{args_cli.num_series}_s{args_cli.seed}_{args_cli.base_model}"
     npz = Path(args_cli.baseline_dir) / f"{key}.npz"
@@ -309,6 +313,50 @@ def build_estimator():
         **dataset.dim_params, model_id_or_path=PATHS[args_cli.base_model],
     )
 
+
+def forecast_quantiles(forecasts):
+    """(n, 9, H). UniCA (como Chronos-Bolt) devuelve sus 9 cuantiles (0.1..0.9) como 'muestras': se usan tal cual."""
+    out_q = []
+    for f in forecasts:
+        s = np.asarray(f.samples) if hasattr(f, "samples") else None
+        if s is not None and s.shape[0] == 9:
+            out_q.append(np.sort(s, axis=0))
+        else:
+            out_q.append(np.stack([f.quantile(q) for q in (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9)]))
+    return np.stack(out_q).astype(np.float32)
+
+
+if args_cli.forecast_from:
+    import datasets
+
+    cxf = dict(np.load(args_cli.forecast_from))
+    ids = [str(x) for x in cxf["ids"]]
+    src_ids = datasets.load_from_disk(str(Path(os.environ["DATA_PATH"]) / args_cli.dataset)).data.column(
+        "item_id").to_pylist()
+    pos = {sid: i for i, sid in enumerate(src_ids)}
+    missing = [x for x in ids if x not in pos]
+    assert not missing, f"no estan en el dataset de UniCA: {missing}"
+    want = {pos[x]: k for k, x in enumerate(ids)}
+    sel_in, sel_y = [None] * len(ids), [None] * len(ids)
+    for i, (inp, lab) in enumerate(zip(test_data.input, test_data.label)):
+        if i in want:
+            sel_in[want[i]], sel_y[want[i]] = inp, np.asarray(lab["target"], np.float32)
+    y = np.stack(sel_y)
+    assert np.allclose(y, cxf["y"], equal_nan=True), "el test de UniCA no coincide con el de ChronosX en estas series"
+    print(f"Pronosticando {len(ids)} series (mismo test que ChronosX): {ids}", flush=True)
+
+    estimator = build_estimator()
+    net = load_trained(estimator.create_lightning_module(), CKPT_DIR / "best.ckpt")
+    predictor = estimator.create_predictor(estimator.create_transformation(), net)
+    predictor.prediction_net.eval()
+    torch.manual_seed(args_cli.seed)
+    ua = list(predictor.predict(sel_in))
+    cxf["UniCA"] = forecast_quantiles(ua)
+    dst = Path(args_cli.forecast_out or out / "forecasts.npz")
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    np.savez(dst, **cxf)
+    print("Guardado en", dst, flush=True)
+    sys.exit(0)
 
 print("\n[2/3] Entrenando UniCA", flush=True)
 if (out / "train_done.json").exists():
